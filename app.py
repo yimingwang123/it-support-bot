@@ -15,12 +15,18 @@ except ImportError:
     # dotenv not installed, will use system environment variables
     pass
 
+# Import Azure OpenAI service
+from azure_openai_service import AzureOpenAIService
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize Azure OpenAI service
+azure_ai_service = AzureOpenAIService()
 
 # IT Support knowledge base with common issues and solutions in German
 IT_KNOWLEDGE_BASE = {
@@ -338,12 +344,32 @@ def send_message():
     if session.get('main_issue') is None:
         session['main_issue'] = user_message
     
-    # Find relevant solution
-    solution = find_relevant_solution(user_message)
+    # Get AI-powered response using Azure OpenAI
+    try:
+        # Prepare conversation context for AI
+        conversation_context = []
+        for entry in session.get('chat_history', [])[-5:]:  # Last 5 messages for context
+            if entry['sender'] == 'User':
+                conversation_context.append(f"Benutzer: {entry['message']}")
+            else:
+                conversation_context.append(f"Assistent: {entry['message']}")
+        
+        # Get AI response
+        bot_response = azure_ai_service.get_it_support_response(
+            user_message, 
+            context="\n".join(conversation_context[:-1])  # Exclude current message
+        )
+        
+        logger.info(f"✅ AI response generated successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting AI response: {str(e)}")
+        # Fallback to keyword-based response
+        solution = find_relevant_solution(user_message)
+        bot_response = f"Ich kann Ihnen bei {solution['title']} helfen. Hier sind die empfohlenen Schritte:\n\n"
+        bot_response += "\n".join(solution['steps'])
     
-    # Create bot response
-    bot_response = f"Ich kann Ihnen bei {solution['title']} helfen. Hier sind die empfohlenen Schritte:\n\n"
-    bot_response += "\n".join(solution['steps'])
+    # Add standard ending to response
     bot_response += "\n\nGibt es noch etwas anderes, womit ich Ihnen helfen kann? Schreiben Sie 'ende', wenn Sie fertig sind."
     
     # Add bot response to chat history
